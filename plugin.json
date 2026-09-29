@@ -1,0 +1,16 @@
+{
+  "id": "notible.teams",
+  "name": "Notible Teams",
+  "version": "0.1.0",
+  "apiVersion": "1.21",
+  "minCoreVersion": "0.91.2",
+  "description": "Test version: share a project with a few people through the Notible Teams server, encrypted on your computer.",
+  "author": "Notible",
+  "entry": "main.js",
+  "permissions": [
+    "data.sync",
+    "data.read",
+    "workspace.ui",
+    "network"
+  ]
+}
