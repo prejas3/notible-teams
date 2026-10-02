@@ -937,9 +937,9 @@ export default {
   manifest: {
     id: "notible.teams",
     name: "Notible Teams",
-    version: "0.1.0",
+    version: "0.1.1",
     apiVersion: "1.21",
-    description: "Test version: share a project with a few people through the Notible Teams server, encrypted on your computer.",
+    description: "Test version: share a project with a few people through the Notible Teams server. It is encrypted on your computer before it leaves.",
     author: "Notible",
     permissions: ["data.sync", "data.read", "workspace.ui", "network"],
   },
