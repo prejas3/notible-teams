@@ -310,7 +310,11 @@ export function planIncoming(items, ctx) {
     if (mine) {
       const mineHash = objectHash(mine);
       if (mineHash === incomingHash) { plan.known[key] = { seq, hash: incomingHash }; continue; }
-      if (!known[key] || mineHash !== known[key].hash) {
+      // CONFLICT-COPY-ROOT: never copy the shared root itself. A copy of the
+      // project is a second project (same automations, linked folders,
+      // favorite) filed INSIDE the original, which the Workspace view listed
+      // as a stray project (Hive #1, 03.10). The server's version wins as usual.
+      if (id !== rootId && (!known[key] || mineHash !== known[key].hash)) {
         plan.conflicts += 1;
         const copyId = newId();
         plan.objects.push({
@@ -937,7 +941,7 @@ export default {
   manifest: {
     id: "notible.teams",
     name: "Notible Teams",
-    version: "0.1.1",
+    version: "0.1.2",
     apiVersion: "1.21",
     description: "Test version: share a project with a few people through the Notible Teams server. It is encrypted on your computer before it leaves.",
     author: "Notible",

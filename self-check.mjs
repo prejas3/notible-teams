@@ -97,6 +97,14 @@ assert.equal(copy.content, "mine");
 assert.match(copy.title, /conflict copy, Ann/);
 assert.deepEqual(plan.relations, [{ from_id: "copy-1", to_id: "F", kind: "in", created_at: plan.relations[0].created_at }]);
 
+// Root project edited on both sides: theirs applied, NO copy (CONFLICT-COPY-ROOT).
+snap = workspace();
+snap.objects.find((o) => o.id === "P").content = "mine";
+plan = planIncoming([item("o:P", 9, obj("P", { type: "project", content: "theirs" }))], ctx({ snapshot: snap, copyLabel: "Ann" }));
+assert.equal(plan.conflicts, 0);
+assert.deepEqual(plan.objects.map((o) => o.id), ["P"]);
+assert.equal(plan.relations.length, 0);
+
 // Same content arriving: nothing to apply.
 plan = planIncoming([item("o:N", 9, obj("N"))], ctx());
 assert.equal(plan.objects.length, 0);
