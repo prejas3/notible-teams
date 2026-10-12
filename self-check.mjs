@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import plugin, {
   inviteCode, parseInviteCode, seal, unseal, sharedSet, planOutgoing, planIncoming,
-  objectHash, latestPerKey, batches, mediaNamesOf, objectKey,
+  objectHash, latestPerKey, batches, mediaNamesOf, objectKey, pluralText, CHANGES_RECEIVED,
 } from "./main.js";
 
 const manifest = JSON.parse(readFileSync(new URL("./plugin.json", import.meta.url), "utf8"));
@@ -164,5 +164,22 @@ assert.equal(batches(Array.from({ length: 250 }, (_, i) => ({ key: `o:${i}`, cip
 assert.deepEqual(mediaNamesOf([{ content: "![](media/0f8fad5b-d9cb-469f-a165-70867728950e.png)", props: "" }]), ["0f8fad5b-d9cb-469f-a165-70867728950e.png"]);
 assert.equal(objectKey("a"), "o:a");
 assert.notEqual(objectHash(obj("a")), objectHash(obj("a", { trashed_at: T })), "trash is a change");
+
+// I18N (Hive #55): one table by count. English: one / other. Polish: one / few / other.
+// A locale without the translation, or an old Core whose t returns the key, must show English.
+{
+  const strings = JSON.parse(readFileSync(new URL("./locales/pl.json", import.meta.url), "utf8")).strings;
+  const translate = (language) => (key, values) => {
+    const text = language === "pl" && strings[key] !== undefined ? strings[key] : key;
+    return values ? text.replace(/\{(\w+)\}/g, (whole, name) => (name in values ? String(values[name]) : whole)) : text;
+  };
+  const show = (text, count) => text.replace("{count}", String(count));
+  for (const count of [1, 2, 5, 22]) {
+    assert.equal(pluralText(translate("en"), CHANGES_RECEIVED, count, "en", { count }), show(count === 1 ? "{count} change received" : "{count} changes received", count), `English for ${count}`);
+    assert.equal(pluralText(translate("pl"), CHANGES_RECEIVED, count, "pl", { count }), show(count === 1 ? "{count} zmiana otrzymana" : count === 5 ? "{count} zmian otrzymanych" : "{count} zmiany otrzymane", count), `Polish for ${count}`);
+  }
+  assert.equal(pluralText(translate("cs"), CHANGES_RECEIVED, 2, "cs", { count: 2 }), show("{count} changes received", 2), "a locale with no translation shows English");
+  assert.equal(pluralText(translate("en"), CHANGES_RECEIVED, 2, "pl", { count: 2 }), show("{count} changes received", 2), "an old Core (t returns the key) shows English");
+}
 
 console.log("Notible Teams self-check passed.");

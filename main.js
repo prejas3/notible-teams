@@ -46,11 +46,11 @@ export function inviteCode(spaceId, token, keyBytes) {
 export function parseInviteCode(text) {
   const parts = String(text ?? "").trim().split(".");
   if (parts.length !== 4 || parts[0] !== INVITE_PREFIX || !parts[1] || !parts[2]) {
-    throw new Error("This is not a Notible Teams invite code.");
+    throw new Error(t("This is not a Notible Teams invite code."));
   }
   let key;
   try { key = base64ToBytes(fromUrl(parts[3])); } catch { key = null; }
-  if (!key || key.length !== 32) throw new Error("The invite code is incomplete. Copy the whole code again.");
+  if (!key || key.length !== 32) throw new Error(t("The invite code is incomplete. Copy the whole code again."));
   return { spaceId: parts[1], token: parts[2], key };
 }
 
@@ -90,6 +90,24 @@ const keyFrom = (bytes) => crypto.subtle.importKey("raw", bytes, "AES-GCM", fals
  * It can still serve an older version of the same item — accepted for the
  * prototype (a member's next edit replaces it).
  */
+
+// I18N (Hive #28): every UI string goes through t(); Polish is in
+// locales/pl.json (checked by scripts/plugin-locale-check.mjs). English until
+// onload() hands t over to Core's translator, which also follows a language
+// change. tr() only marks a module-level label that is passed to t() later.
+let t = (key, values) => (values ? key.replace(/\{(\w+)\}/g, (whole, name) => (name in values ? String(values[name]) : whole)) : key);
+const tr = (key) => key;
+
+// I18N (Hive #55): text for a count. An `extra` key ("...#few") exists only in
+// locale files, so English never shows it; an untranslated one falls back to one/other.
+export const pluralText = (t, forms, count, locale, values) => {
+  const category = new Intl.PluralRules(locale || "en").select(count);
+  const extra = forms.extra?.[category];
+  return t(extra && t(extra) !== extra ? extra : category === "one" ? forms.one : forms.other, values);
+};
+export const CHANGES_RECEIVED = { one: tr("{count} change received"), other: tr("{count} changes received"), extra: { few: tr("{count} changes received#few") } };
+const CONFLICT_COPIES = { one: tr("{count} conflict copy made"), other: tr("{count} conflict copies made"), extra: { few: tr("{count} conflict copies made#few") } };
+const IMAGES = { one: tr("{count} image"), other: tr("{count} images"), extra: { few: tr("{count} images#few") } };
 export async function seal(keyBytes, payload, aad) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const body = await gzip(enc.encode(JSON.stringify(payload)));
@@ -437,12 +455,12 @@ export class Teams {
     });
     if (response.status === 401 && path !== "/v1/session") {
       this.context.storage.delete("session");
-      throw new Error("Your Teams session ended. Sign in again.");
+      throw new Error(t("Your Teams session ended. Sign in again."));
     }
     if (raw && response.ok) return new Uint8Array(await response.arrayBuffer());
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const error = new Error(data.error || `Teams server answered ${response.status}.`);
+      const error = new Error(data.error || t("Teams server answered {status}.", { status: response.status }));
       error.status = response.status;
       throw error;
     }
@@ -455,11 +473,11 @@ export class Teams {
       grant = await this.context.oauth.google.signIn("google.identity");
     } catch (error) {
       if (/unknown sign-in provider/i.test(String(error?.message ?? error))) {
-        throw new Error("Notible Teams needs Notible 0.91.2 or newer.");
+        throw new Error(t("Notible Teams needs Notible 0.91.2 or newer."));
       }
       throw error;
     }
-    if (!grant?.idToken) throw new Error("Notible Teams needs Notible 0.91.2 or newer.");
+    if (!grant?.idToken) throw new Error(t("Notible Teams needs Notible 0.91.2 or newer."));
     const { session, user } = await this.api("POST", "/v1/session", { idToken: grant.idToken });
     this.context.storage.set("session", session);
     this.context.storage.set("user", user);
@@ -525,7 +543,7 @@ export class Teams {
     const notes = [];
     const totals = { received: 0, sent: 0, conflicts: 0, images: 0 };
     try {
-      this.setStatus("busy", "Synchronising…");
+      this.setStatus("busy", t("Synchronising…"));
       const me = await this.refresh();
       const member = new Set(me.spaces.map((s) => s.id));
       // Spaces this device has a key for but is no longer in: forget the
@@ -534,7 +552,7 @@ export class Teams {
         const id = key.startsWith("space:") ? key.slice(6) : null;
         if (id && !member.has(id)) {
           this.context.storage.delete(key);
-          notes.push("You are no longer in one of your shared projects; its notes stay on this computer.");
+          notes.push(t("You are no longer in one of your shared projects; its notes stay on this computer."));
         }
       }
       const types = new Set((await this.context.data.types.list()).map((t) => t.name));
@@ -550,12 +568,12 @@ export class Teams {
       }
       this.context.storage.set("lastSync", Date.now());
       const parts = [
-        totals.received ? `${totals.received} change${totals.received === 1 ? "" : "s"} received` : null,
-        totals.sent ? `${totals.sent} sent` : null,
-        totals.conflicts ? `${totals.conflicts} conflict cop${totals.conflicts === 1 ? "y" : "ies"} made` : null,
-        totals.images ? `${totals.images} image${totals.images === 1 ? "" : "s"}` : null,
+        totals.received ? pluralText(t, CHANGES_RECEIVED, totals.received, this.context.i18n?.locale, { count: totals.received }) : null,
+        totals.sent ? t("{count} sent", { count: totals.sent }) : null,
+        totals.conflicts ? pluralText(t, CONFLICT_COPIES, totals.conflicts, this.context.i18n?.locale, { count: totals.conflicts }) : null,
+        totals.images ? pluralText(t, IMAGES, totals.images, this.context.i18n?.locale, { count: totals.images }) : null,
       ].filter(Boolean);
-      this.setStatus(notes.length && !parts.length ? "error" : "ok", parts.join(" · ") || (notes.length ? "Some items could not be synchronised" : "Up to date"), notes);
+      this.setStatus(notes.length && !parts.length ? "error" : "ok", parts.join(" · ") || (notes.length ? t("Some items could not be synchronised") : t("Up to date")), notes);
       return totals;
     } catch (error) {
       this.setStatus("error", error.message || String(error), notes);
@@ -566,7 +584,7 @@ export class Teams {
   }
 
   spaceTitle(space) {
-    return this.titles?.get(space.rootId) || "Shared project";
+    return this.titles?.get(space.rootId) || t("Shared project");
   }
 
   async runSpace(space, state, types, notes) {
@@ -632,7 +650,7 @@ export class Teams {
     for (const item of planOutgoing(snapshot, space.rootId, state.known)) {
       const ciphertext = bytesToBase64(await seal(key, item.payload, aad(item.key)));
       if (ciphertext.length > MAX_ITEM_CHARS) {
-        notes.push(`“${item.payload.title ?? item.key}” is too large to share.`);
+        notes.push(t("“{title}” is too large to share.", { title: item.payload.title ?? item.key }));
         continue;
       }
       outgoing.push({ ...item, ciphertext });
@@ -682,7 +700,7 @@ export class Teams {
         sent.add(name);
         moved += 1;
       } catch (error) {
-        notes.push(`Images not sent: ${error.message}`);
+        notes.push(t("Images not sent: {reason}", { reason: error.message }));
         break;
       }
     }
@@ -775,7 +793,7 @@ function mountPanel(teams, container) {
   root.append(element("style", { textContent: styles }));
   root.append(element("p", {
     className: "nteams-lead",
-    textContent: "Share a project with a few people. It is encrypted on this computer before it goes to the Notible Teams server, which cannot read it. Test version.",
+    textContent: t("Share a project with a few people. It is encrypted on this computer before it goes to the Notible Teams server, which cannot read it. Test version."),
   }));
 
   const summaryText = element("span", {});
@@ -798,12 +816,12 @@ function mountPanel(teams, container) {
     return true;
   };
 
-  const now = element("button", { type: "button", className: "nteams-primary", textContent: "Synchronise now" });
+  const now = element("button", { type: "button", className: "nteams-primary", textContent: t("Synchronise now") });
   now.onclick = async () => { now.disabled = true; await teams.run(); now.disabled = false; render(); };
-  const signIn = element("button", { type: "button", className: "nteams-primary", textContent: "Sign in with Google" });
+  const signIn = element("button", { type: "button", className: "nteams-primary", textContent: t("Sign in with Google") });
   signIn.onclick = async () => {
     signIn.disabled = true;
-    if (await act(() => teams.signIn(), "Finish signing in in your browser, then come back here.")) {
+    if (await act(() => teams.signIn(), t("Finish signing in in your browser, then come back here."))) {
       say("idle", "");
       render();
       teams.run().then(render);
@@ -815,10 +833,10 @@ function mountPanel(teams, container) {
     const on = teams.signedIn();
     const last = teams.context.storage.get("lastSync");
     summary.dataset.state = on ? state : "idle";
-    summaryText.textContent = !on ? "Not signed in"
-      : state === "busy" ? "Synchronising…"
-        : state === "error" ? "Needs attention"
-          : last ? `Synced · ${when(last)}` : "Signed in";
+    summaryText.textContent = !on ? t("Not signed in")
+      : state === "busy" ? t("Synchronising…")
+        : state === "error" ? t("Needs attention")
+          : last ? `Synced · ${when(last)}` : t("Signed in");
     now.disabled = state === "busy";
     if (on && (state === "ok" || state === "error")) say(state, text);
     details.hidden = !notes.length;
@@ -853,77 +871,77 @@ function mountPanel(teams, container) {
     for (const space of me?.spaces ?? []) {
       const state = teams.spaceState(space.id);
       const owner = space.ownerId === user.id;
-      const title = titles.get(space.rootId) || "Shared project (arrives with the first sync)";
+      const title = titles.get(space.rootId) || t("Shared project (arrives with the first sync)");
       const body = row(`space:${space.id}`, title, `${space.members.length} ${space.members.length === 1 ? "person" : "people"}`);
       body.append(element("ul", { className: "nteams-people" }, space.members.map((m) => element("li", {}, [
-        element("span", { textContent: `${m.name || m.email}${m.name ? ` · ${m.email}` : ""}${m.id === space.ownerId ? " · owner" : ""}${m.id === user.id ? " · you" : ""}` }),
+        element("span", { textContent: `${m.name || m.email}${m.name ? ` · ${m.email}` : ""}${m.id === space.ownerId ? t(" · owner") : ""}${m.id === user.id ? t(" · you") : ""}` }),
         owner && m.id !== user.id
-          ? confirmButton("Remove", "Click again to remove", () => act(async () => { await teams.removeMember(space.id, m.id); render(); }))
+          ? confirmButton(t("Remove"), t("Click again to remove"), () => act(async () => { await teams.removeMember(space.id, m.id); render(); }))
           : null,
       ]))));
       if (!state) {
-        body.append(element("p", { textContent: "You are in this project on another computer. To open it here, ask a member for an invite code and paste it under “Join with a code”." }));
+        body.append(element("p", { textContent: t("You are in this project on another computer. To open it here, ask a member for an invite code and paste it under “Join with a code”.") }));
         continue;
       }
-      const code = element("input", { className: "nteams-code", readOnly: true, placeholder: "Invite code appears here" });
-      const make = element("button", { type: "button", textContent: "Create invite code" });
+      const code = element("input", { className: "nteams-code", readOnly: true, placeholder: t("Invite code appears here") });
+      const make = element("button", { type: "button", textContent: t("Create invite code") });
       make.onclick = () => act(async () => {
         code.value = await teams.invite(space.id);
         code.select();
         await navigator.clipboard?.writeText(code.value).catch(() => {});
-        say("idle", "Invite code copied. Send it privately: it opens the project, once, within 24 hours.");
+        say("idle", t("Invite code copied. Send it privately: it opens the project, once, within 24 hours."));
       });
       body.append(
         element("div", { className: "nteams-row" }, [make, code]),
-        element("p", { className: "nteams-hint", textContent: "Removing someone stops their access to the server. What their computer already has stays there." }),
+        element("p", { className: "nteams-hint", textContent: t("Removing someone stops their access to the server. What their computer already has stays there.") }),
         element("div", { className: "nteams-row" }, [
           owner
-            ? confirmButton("Delete from the server", "Click again: delete for everyone", () => act(async () => { await teams.deleteSpace(space.id); render(); }))
-            : confirmButton("Leave", "Click again to leave", () => act(async () => { await teams.removeMember(space.id, user.id); render(); })),
+            ? confirmButton(t("Delete from the server"), t("Click again: delete for everyone"), () => act(async () => { await teams.deleteSpace(space.id); render(); }))
+            : confirmButton(t("Leave"), t("Click again to leave"), () => act(async () => { await teams.removeMember(space.id, user.id); render(); })),
         ]),
-        element("p", { className: "nteams-hint", textContent: owner ? "Deleting removes the server copy for everyone. The notes stay in each person's Notible." : "Leaving keeps the notes on this computer; they just stop updating." }),
+        element("p", { className: "nteams-hint", textContent: owner ? t("Deleting removes the server copy for everyone. The notes stay in each person's Notible.") : t("Leaving keeps the notes on this computer; they just stop updating.") }),
       );
     }
 
     // Share a project.
     const sharedRoots = new Set((me?.spaces ?? []).map((s) => s.rootId));
     const projects = snapshot.objects.filter((o) => o.type === "project" && !o.trashed_at && !sharedRoots.has(o.id));
-    const shareBody = row("share", "Share a project", projects.length ? "" : "No projects yet");
+    const shareBody = row("share", t("Share a project"), projects.length ? "" : t("No projects yet"));
     if (projects.length) {
-      const select = element("select", {}, projects.map((p) => element("option", { value: p.id, textContent: p.title || "Untitled" })));
-      const share = element("button", { type: "button", className: "nteams-primary", textContent: "Share" });
+      const select = element("select", {}, projects.map((p) => element("option", { value: p.id, textContent: p.title || t("Untitled") })));
+      const share = element("button", { type: "button", className: "nteams-primary", textContent: t("Share") });
       share.onclick = () => act(async () => {
         await teams.share(select.value);
         await teams.run();
         openRows.add("share");
         render();
-      }, "Sharing…");
+      }, t("Sharing…"));
       shareBody.append(
         element("div", { className: "nteams-row" }, [select, share]),
-        element("p", { textContent: "The project and everything filed under it is shared. Then create an invite code for each person." }),
+        element("p", { textContent: t("The project and everything filed under it is shared. Then create an invite code for each person.") }),
       );
     } else {
-      shareBody.append(element("p", { textContent: "Create a project first; everything filed under it can be shared." }));
+      shareBody.append(element("p", { textContent: t("Create a project first; everything filed under it can be shared.") }));
     }
 
     // Join.
-    const joinBody = row("join", "Join with a code", "");
-    const input = element("input", { className: "nteams-code", placeholder: "NT1.…" });
-    const join = element("button", { type: "button", textContent: "Join" });
+    const joinBody = row("join", t("Join with a code"), "");
+    const input = element("input", { className: "nteams-code", placeholder: t("NT1.…") });
+    const join = element("button", { type: "button", textContent: t("Join") });
     join.onclick = () => act(async () => {
       await teams.join(input.value);
       input.value = "";
       await teams.run();
       render();
-    }, "Joining…");
+    }, t("Joining…"));
     joinBody.append(element("div", { className: "nteams-row" }, [input, join]));
 
     // Account.
-    const accountBody = row("account", "Account", user.email ?? "");
-    const out = element("button", { type: "button", className: "nteams-danger", textContent: "Sign out" });
+    const accountBody = row("account", t("Account"), user.email ?? "");
+    const out = element("button", { type: "button", className: "nteams-danger", textContent: t("Sign out") });
     out.onclick = () => act(async () => { await teams.signOut(); render(); });
     accountBody.append(
-      element("p", { className: "nteams-warning", textContent: "Do not install plugins from other authors on a computer that is in a team: any installed plugin can read what this one can." }),
+      element("p", { className: "nteams-warning", textContent: t("Do not install plugins from other authors on a computer that is in a team: any installed plugin can read what this one can.") }),
       element("div", { className: "nteams-row" }, [out]),
     );
     paint(teams.status);
@@ -941,7 +959,7 @@ export default {
   manifest: {
     id: "notible.teams",
     name: "Notible Teams",
-    version: "0.1.2",
+    version: "0.1.3",
     apiVersion: "1.21",
     description: "Test version: share a project with a few people through the Notible Teams server. It is encrypted on your computer before it leaves.",
     author: "Notible",
@@ -949,6 +967,7 @@ export default {
   },
 
   onload(context) {
+    if (context.i18n?.t) t = (key, values) => context.i18n.t(key, values);
     const teams = new Teams(context);
     this._teams = teams;
     this._disposables = [];
@@ -957,13 +976,13 @@ export default {
     }));
     this._disposables.push(context.settings.register({
       id: "teams",
-      title: "Teams",
+      title: t("Teams"),
       mount: ({ container }) => mountPanel(teams, container),
     }));
     this._disposables.push(context.commands.register({
       id: "now",
-      name: "Teams: synchronise now",
-      description: "Send and receive changes to shared projects.",
+      name: t("Teams: synchronise now"),
+      description: t("Send and receive changes to shared projects."),
       execute: () => teams.run(),
     }));
     // ponytail: polling, not a live connection. The app's CSP has no wss:
